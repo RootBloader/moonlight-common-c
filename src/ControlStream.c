@@ -1895,8 +1895,17 @@ int startControlStream(void) {
         // The 3DS can take a bit longer to set up when starting fresh
         enet_peer_timeout(peer, 2, 60000, 60000);
 #else
-        // Set the peer timeout to 10 seconds and limit backoff to 2x RTT
-        enet_peer_timeout(peer, 2, 10000, 10000);
+        // Set the peer timeout to 5 seconds and limit backoff to 2x RTT
+        //
+        // Serval-local: upstream uses 10 seconds here. ENet starts this clock at
+        // the first reliable send that goes unacked, and it pings every 500 ms,
+        // so 5000 means the host has to go silent for 5 to 5.5 seconds before
+        // the session is declared dead. That is still far longer than a Wi-Fi
+        // roam or an AWDL burst, and it halves the wait before the stream window
+        // stops and offers Reconnect (SES-020). The RTO cap moves with it
+        // (timeoutMaximum / 5), so retransmits go out every second instead of
+        // every two, which helps a stream that is only stumbling.
+        enet_peer_timeout(peer, 2, 5000, 5000);
 #endif
     }
     else {
