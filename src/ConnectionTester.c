@@ -2,13 +2,11 @@
 
 #define TEST_PORT_TIMEOUT_SEC 3
 
-#define VALID_PORT_FLAG_MASK (ML_PORT_FLAG_TCP_47984 | \
-                              ML_PORT_FLAG_TCP_47989 | \
-                              ML_PORT_FLAG_TCP_48010 | \
-                              ML_PORT_FLAG_UDP_47998 | \
-                              ML_PORT_FLAG_UDP_47999 | \
-                              ML_PORT_FLAG_UDP_48000 | \
-                              ML_PORT_FLAG_UDP_48010)
+#define VALID_PORT_FLAG_MASK (ML_PORT_FLAG_TCP_9411 | \
+                              ML_PORT_FLAG_TCP_9412 | \
+                              ML_PORT_FLAG_UDP_9413 | \
+                              ML_PORT_FLAG_UDP_9414 | \
+                              ML_PORT_FLAG_UDP_9415)
 
 #define PORT_FLAGS_MAX_COUNT 32
 
@@ -19,11 +17,16 @@ unsigned int LiGetPortFlagsFromStage(int stage)
     switch (stage)
     {
         case STAGE_RTSP_HANDSHAKE:
-            // GFE 3.22 requires a successful ping on 48000 to complete RTSP handshake
-            return ML_PORT_FLAG_TCP_48010 | ML_PORT_FLAG_UDP_48010 | ML_PORT_FLAG_UDP_48000;
+            return ML_PORT_FLAG_TCP_9412;
 
         case STAGE_CONTROL_STREAM_START:
-            return ML_PORT_FLAG_UDP_47999;
+            return ML_PORT_FLAG_UDP_9413;
+
+        case STAGE_VIDEO_STREAM_START:
+            return ML_PORT_FLAG_UDP_9414;
+
+        case STAGE_AUDIO_STREAM_START:
+            return ML_PORT_FLAG_UDP_9415;
 
         default:
             return 0;
@@ -35,9 +38,7 @@ unsigned int LiGetPortFlagsFromTerminationErrorCode(int errorCode)
     switch (errorCode)
     {
         case ML_ERROR_NO_VIDEO_TRAFFIC:
-            // Video is UDP 47998, but we'll also test UDP 48000 because
-            // we don't have an equivalent audio traffic error.
-            return ML_PORT_FLAG_UDP_47998 | ML_PORT_FLAG_UDP_48000;
+            return ML_PORT_FLAG_UDP_9414;
 
         default:
             return 0;
@@ -55,22 +56,18 @@ unsigned short LiGetPortFromPortFlagIndex(int portFlagIndex)
     switch (portFlagIndex)
     {
         // TCP ports
-        case ML_PORT_INDEX_TCP_47984:
-            return 47984;
-        case ML_PORT_INDEX_TCP_47989:
-            return 47989;
-        case ML_PORT_INDEX_TCP_48010:
-            return 48010;
+        case ML_PORT_INDEX_TCP_9411:
+            return CARACAL_API_PORT;
+        case ML_PORT_INDEX_TCP_9412:
+            return CARACAL_RTSP_PORT;
 
         // UDP ports
-        case ML_PORT_INDEX_UDP_47998:
-            return 47998;
-        case ML_PORT_INDEX_UDP_47999:
-            return 47999;
-        case ML_PORT_INDEX_UDP_48000:
-            return 48000;
-        case ML_PORT_INDEX_UDP_48010:
-            return 48010;
+        case ML_PORT_INDEX_UDP_9413:
+            return CARACAL_CONTROL_PORT;
+        case ML_PORT_INDEX_UDP_9414:
+            return CARACAL_VIDEO_PORT;
+        case ML_PORT_INDEX_UDP_9415:
+            return CARACAL_AUDIO_PORT;
 
         default:
             LC_ASSERT(false);

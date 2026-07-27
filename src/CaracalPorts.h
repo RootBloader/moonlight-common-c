@@ -1,0 +1,7 @@
+#pragma once
+
+#define CARACAL_API_PORT     9411
+#define CARACAL_RTSP_PORT    9412
+#define CARACAL_CONTROL_PORT 9413
+#define CARACAL_VIDEO_PORT   9414
+#define CARACAL_AUDIO_PORT   9415

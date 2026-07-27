@@ -414,7 +414,7 @@ typedef void(*ConnListenerConnectionTerminated)(int errorCode);
 
 // This error is passed to ConnListenerConnectionTerminated() if no video data
 // was ever received for this connection after waiting several seconds. It likely
-// indicates a problem with traffic on UDP 47998 due to missing or incorrect
+// indicates a problem with traffic on UDP 9414 due to missing or incorrect
 // firewall or port forwarding rules.
 #define ML_ERROR_NO_VIDEO_TRAFFIC -100
 
@@ -904,23 +904,19 @@ typedef struct _RTP_VIDEO_STATS {
 const RTP_VIDEO_STATS* LiGetRTPVideoStats(void);
 
 // Port index flags for use with LiGetPortFromPortFlagIndex() and LiGetProtocolFromPortFlagIndex()
-#define ML_PORT_INDEX_TCP_47984 0
-#define ML_PORT_INDEX_TCP_47989 1
-#define ML_PORT_INDEX_TCP_48010 2
-#define ML_PORT_INDEX_UDP_47998 8
-#define ML_PORT_INDEX_UDP_47999 9
-#define ML_PORT_INDEX_UDP_48000 10
-#define ML_PORT_INDEX_UDP_48010 11
+#define ML_PORT_INDEX_TCP_9411 0
+#define ML_PORT_INDEX_TCP_9412 1
+#define ML_PORT_INDEX_UDP_9413 8
+#define ML_PORT_INDEX_UDP_9414 9
+#define ML_PORT_INDEX_UDP_9415 10
 
 // Port flags for use with LiTestClientConnectivity()
 #define ML_PORT_FLAG_ALL       0xFFFFFFFF
-#define ML_PORT_FLAG_TCP_47984 0x0001
-#define ML_PORT_FLAG_TCP_47989 0x0002
-#define ML_PORT_FLAG_TCP_48010 0x0004
-#define ML_PORT_FLAG_UDP_47998 0x0100
-#define ML_PORT_FLAG_UDP_47999 0x0200
-#define ML_PORT_FLAG_UDP_48000 0x0400
-#define ML_PORT_FLAG_UDP_48010 0x0800
+#define ML_PORT_FLAG_TCP_9411 0x0001
+#define ML_PORT_FLAG_TCP_9412 0x0002
+#define ML_PORT_FLAG_UDP_9413 0x0100
+#define ML_PORT_FLAG_UDP_9414 0x0200
+#define ML_PORT_FLAG_UDP_9415 0x0400
 
 // Returns the port flags that correspond to ports involved in a failing connection stage, or
 // connection termination error.

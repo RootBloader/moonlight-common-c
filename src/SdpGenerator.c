@@ -560,7 +560,7 @@ static int fillSdpTail(char* buffer, size_t length) {
     return snprintf(buffer, length,
         "t=0 0\r\n"
         "m=video %d  \r\n",
-        AppVersionQuad[0] < 4 ? 47996 : VideoPortNumber);
+        VideoPortNumber);
 }
 
 // Get the SDP attributes for the stream config

@@ -715,7 +715,7 @@ static int parseOpusConfigFromParamString(char* paramStr, int channelCount, POPU
 }
 
 // Parse the server port from the Transport header
-// Example: unicast;server_port=48000-48001;source=192.168.35.177
+// Example: unicast;server_port=9415;source=192.168.35.177
 static bool parseServerPortFromTransport(PRTSP_MESSAGE response, uint16_t* port) {
     char* transport;
     char* portStart;
@@ -1190,8 +1190,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         // Parse the audio port out of the RTSP SETUP response
         LC_ASSERT(AudioPortNumber == 0);
         if (!parseServerPortFromTransport(&response, &AudioPortNumber)) {
-            // Use the well known port if parsing fails
-            AudioPortNumber = 48000;
+            AudioPortNumber = CARACAL_AUDIO_PORT;
 
             Limelog("Audio port: %u (RTSP parsing failed)\n", AudioPortNumber);
         }
@@ -1274,8 +1273,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         // Parse the video port out of the RTSP SETUP response
         LC_ASSERT(VideoPortNumber == 0);
         if (!parseServerPortFromTransport(&response, &VideoPortNumber)) {
-            // Use the well known port if parsing fails
-            VideoPortNumber = 47998;
+            VideoPortNumber = CARACAL_VIDEO_PORT;
 
             Limelog("Video port: %u (RTSP parsing failed)\n", VideoPortNumber);
         }
@@ -1318,8 +1316,7 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         // Parse the control port out of the RTSP SETUP response
         LC_ASSERT(ControlPortNumber == 0);
         if (!parseServerPortFromTransport(&response, &ControlPortNumber)) {
-            // Use the well known port if parsing fails
-            ControlPortNumber = 47999;
+            ControlPortNumber = CARACAL_CONTROL_PORT;
 
             Limelog("Control port: %u (RTSP parsing failed)\n", ControlPortNumber);
         }

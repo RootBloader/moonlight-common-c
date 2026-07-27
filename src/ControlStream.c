@@ -1838,16 +1838,9 @@ int startControlStream(void) {
 #endif
     }
     else {
-        // NB: Do NOT use ControlPortNumber here. 47995 is correct for these old versions.
-        LC_ASSERT(ControlPortNumber == 0);
-        ctlSock = connectTcpSocket(&RemoteAddr, AddrLen,
-            47995, CONTROL_STREAM_TIMEOUT_SEC);
-        if (ctlSock == INVALID_SOCKET) {
-            stopping = true;
-            return LastSocketFail();
-        }
-
-        enableNoDelay(ctlSock);
+        Limelog("Caracal requires the ENet control protocol\n");
+        stopping = true;
+        return -1;
     }
 
     err = PltCreateThread("ControlRecv", controlReceiveThreadFunc, NULL, &controlReceiveThread);
