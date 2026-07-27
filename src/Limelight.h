@@ -483,6 +483,21 @@ typedef void(*ConnListenerSetAdaptiveTriggers)(uint16_t controllerNumber, uint8_
 // This callback is invoked to set a controller's RGB LED (if present).
 typedef void(*ConnListenerSetControllerLED)(uint16_t controllerNumber, uint8_t r, uint8_t g, uint8_t b);
 
+// Caracal Cursor Sync events. Coordinates are normalized to 0...65535 with a
+// top-left origin, matching Windows GetCursorPos and the absolute mouse path.
+typedef struct _LI_CURSOR_SYNC_EVENT {
+    uint8_t kind;
+    uint8_t flags;
+    uint8_t edge;
+    uint8_t reserved;
+    uint32_t generation;
+    uint32_t sequence;
+    uint32_t x;
+    uint32_t y;
+} LI_CURSOR_SYNC_EVENT, *PLI_CURSOR_SYNC_EVENT;
+
+typedef void(*ConnListenerCursorSync)(const LI_CURSOR_SYNC_EVENT* event);
+
 typedef struct _CONNECTION_LISTENER_CALLBACKS {
     ConnListenerStageStarting stageStarting;
     ConnListenerStageComplete stageComplete;
@@ -497,6 +512,7 @@ typedef struct _CONNECTION_LISTENER_CALLBACKS {
     ConnListenerSetMotionEventState setMotionEventState;
     ConnListenerSetControllerLED setControllerLED;
     ConnListenerSetAdaptiveTriggers setAdaptiveTriggers;
+    ConnListenerCursorSync cursorSync;
 } CONNECTION_LISTENER_CALLBACKS, *PCONNECTION_LISTENER_CALLBACKS;
 
 // Use this function to zero the connection callbacks when allocated on the stack or heap
@@ -568,6 +584,12 @@ const char* LiGetStageName(int stage);
 // ENet for the control stream (very old versions), or if the ENet peer is not connected.
 // This function may only be called between LiStartConnection() and LiStopConnection().
 bool LiGetEstimatedRttInfo(uint32_t* estimatedRtt, uint32_t* estimatedRttVariance);
+
+// Sends one Cursor Sync packet over Caracal's encrypted control stream. The
+// position kind is unreliable/sequenced; ownership kinds are reliable.
+int LiSendCursorSyncEvent(uint8_t kind, uint8_t flags, uint8_t edge,
+                          uint32_t generation, uint32_t sequence,
+                          uint32_t x, uint32_t y);
 
 // This function queues a relative mouse move event to be sent to the remote server.
 int LiSendMouseMoveEvent(short deltaX, short deltaY);

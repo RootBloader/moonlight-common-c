@@ -83,6 +83,7 @@ typedef struct _QUEUED_ASYNC_CALLBACK {
             uint8_t left[DS_EFFECT_PAYLOAD_SIZE];
             uint8_t right[DS_EFFECT_PAYLOAD_SIZE];
         } dsAdaptiveTrigger;
+        LI_CURSOR_SYNC_EVENT cursorSync;
     } data;
     LINKED_BLOCKING_QUEUE_ENTRY entry;
 } QUEUED_ASYNC_CALLBACK, *PQUEUED_ASYNC_CALLBACK;
@@ -140,6 +141,11 @@ static PPLT_CRYPTO_CONTEXT decryptionCtx;
 #define IDX_SET_MOTION_EVENT 10
 #define IDX_SET_RGB_LED 11
 #define IDX_DS_ADAPTIVE_TRIGGERS 12
+#define IDX_CURSOR_SYNC 13
+
+// Caracal-only control extension. It is outside the stock packet-type table,
+// so older hosts ignore it rather than misinterpreting it.
+#define CARACAL_CURSOR_SYNC_PACKET_TYPE 0x7f20
 
 #define CONTROL_STREAM_TIMEOUT_SEC 10
 #define CONTROL_STREAM_LINGER_TIMEOUT_SEC 2
@@ -1010,6 +1016,9 @@ static void asyncCallbackThreadFunc(void* context) {
                                                   queuedCb->data.dsAdaptiveTrigger.left,
                                                   queuedCb->data.dsAdaptiveTrigger.right);
             break;
+        case IDX_CURSOR_SYNC:
+            ListenerCallbacks.cursorSync(&queuedCb->data.cursorSync);
+            break;
         default:
             // Unhandled packet type from queueAsyncCallback()
             LC_ASSERT(false);
@@ -1026,7 +1035,8 @@ static bool needsAsyncCallback(unsigned short packetType) {
            packetType == packetTypes[IDX_SET_MOTION_EVENT] ||
            packetType == packetTypes[IDX_SET_RGB_LED] ||
            packetType == packetTypes[IDX_HDR_INFO] ||
-           packetType == packetTypes[IDX_DS_ADAPTIVE_TRIGGERS];
+           packetType == packetTypes[IDX_DS_ADAPTIVE_TRIGGERS] ||
+           packetType == CARACAL_CURSOR_SYNC_PACKET_TYPE;
 }
 
 static void queueAsyncCallback(PNVCTL_ENET_PACKET_HEADER_V1 ctlHdr, int packetLength) {
@@ -1086,6 +1096,22 @@ static void queueAsyncCallback(PNVCTL_ENET_PACKET_HEADER_V1 ctlHdr, int packetLe
         BbGetBytes(&bb, queuedCb->data.dsAdaptiveTrigger.left, DS_EFFECT_PAYLOAD_SIZE);
         BbGetBytes(&bb, queuedCb->data.dsAdaptiveTrigger.right, DS_EFFECT_PAYLOAD_SIZE);
         queuedCb->typeIndex = IDX_DS_ADAPTIVE_TRIGGERS;
+    }
+    else if (ctlHdr->type == CARACAL_CURSOR_SYNC_PACKET_TYPE) {
+        if (packetLength - (int)sizeof(*ctlHdr) != sizeof(LI_CURSOR_SYNC_EVENT)) {
+            free(queuedCb);
+            return;
+        }
+
+        BbGet8(&bb, &queuedCb->data.cursorSync.kind);
+        BbGet8(&bb, &queuedCb->data.cursorSync.flags);
+        BbGet8(&bb, &queuedCb->data.cursorSync.edge);
+        BbGet8(&bb, &queuedCb->data.cursorSync.reserved);
+        BbGet32(&bb, &queuedCb->data.cursorSync.generation);
+        BbGet32(&bb, &queuedCb->data.cursorSync.sequence);
+        BbGet32(&bb, &queuedCb->data.cursorSync.x);
+        BbGet32(&bb, &queuedCb->data.cursorSync.y);
+        queuedCb->typeIndex = IDX_CURSOR_SYNC;
     }
     else {
         // Unhandled packet type from needsAsyncCallback()
@@ -1699,6 +1725,42 @@ int sendInputPacketOnControlStream(unsigned char* data, int length, uint8_t chan
     }
 
     return 0;
+}
+
+int LiSendCursorSyncEvent(uint8_t kind, uint8_t flags, uint8_t edge,
+                          uint32_t generation, uint32_t sequence,
+                          uint32_t x, uint32_t y) {
+    char payload[sizeof(LI_CURSOR_SYNC_EVENT)];
+    BYTE_BUFFER bb;
+    uint8_t channel;
+    uint32_t packetFlags;
+
+    if (client == NULL || peer == NULL || AppVersionQuad[0] < 5) {
+        return -2;
+    }
+
+    BbInitializeWrappedBuffer(&bb, payload, 0, sizeof(payload), BYTE_ORDER_LITTLE);
+    BbPut8(&bb, kind);
+    BbPut8(&bb, flags);
+    BbPut8(&bb, edge);
+    BbPut8(&bb, 0);
+    BbPut32(&bb, generation);
+    BbPut32(&bb, sequence);
+    BbPut32(&bb, x);
+    BbPut32(&bb, y);
+
+    if (kind == 1) {
+        channel = CTRL_CHANNEL_CURSOR_STATE;
+        packetFlags = 0; // unreliable, sequenced by ENet channel
+    }
+    else {
+        channel = CTRL_CHANNEL_CURSOR_OWNER;
+        packetFlags = ENET_PACKET_FLAG_RELIABLE;
+    }
+
+    return sendMessageAndForget(CARACAL_CURSOR_SYNC_PACKET_TYPE,
+                                sizeof(payload), payload, channel,
+                                packetFlags, false) ? 0 : -1;
 }
 
 // Called by the input stream to flush queued packets before a batching wait
