@@ -112,6 +112,9 @@ static int intervalTotalFrameCount;
 static uint64_t intervalStartTimeMs;
 static int lastIntervalLossPercentage;
 static int lastConnectionStatusUpdate;
+// Serval-local: whether the host is currently unanswering, so the interruption
+// and its recovery are each reported once rather than every loop iteration.
+static bool hostSilent;
 static uint32_t currentEnetSequenceNumber;
 static uint64_t firstFrameTimeMs;
 
@@ -127,6 +130,18 @@ static PPLT_CRYPTO_CONTEXT decryptionCtx;
 #define CONN_CONSECUTIVE_POOR_LOSS_RATE 15
 #define CONN_OKAY_LOSS_RATE 5
 #define CONN_STATUS_SAMPLE_PERIOD 3000
+
+// Serval-local: how long the host may leave us unacknowledged before the client
+// is told the stream is interrupted.
+//
+// ENet updates peer->lastReceiveTime when the host acknowledges one of our
+// reliable sends. The periodic ping is reliable and goes out every
+// PERIODIC_PING_INTERVAL_MS (100 ms) on Sunshine, and ENet pings an otherwise
+// idle peer every 500 ms, so a live host refreshes that stamp at least twice a
+// second. One full second of silence is ten unanswered pings on Sunshine and
+// two on anything older, and it is a fifth of the way to the 5-second peer
+// timeout that ends the session outright.
+#define CONTROL_INTERRUPTION_SILENCE_MS 1000
 
 #define IDX_START_A 0
 #define IDX_REQUEST_IDR_FRAME 0
@@ -355,6 +370,7 @@ int initializeControlStream(void) {
     intervalStartTimeMs = 0;
     lastIntervalLossPercentage = 0;
     lastConnectionStatusUpdate = CONN_STATUS_OKAY;
+    hostSilent = false;
     firstFrameTimeMs = 0;
     currentEnetSequenceNumber = 0;
     usePeriodicPing = APP_VERSION_AT_LEAST(7, 1, 415);
@@ -1138,11 +1154,20 @@ static void controlReceiveThreadFunc(void* context) {
     while (!PltIsThreadInterrupted(&controlReceiveThread)) {
         ENetEvent event;
         enet_uint32 waitTimeMs;
+        enet_uint32 silenceMs;
 
         PltLockMutex(&enetMutex);
 
         // Poll for new packets and process retransmissions
         err = serviceEnetHost(client, &event, 0);
+
+        // Serval-local: how long the host has left us unacknowledged. Read here,
+        // under the same lock as the service call that just refreshed
+        // serviceTime; reported below, outside the lock, so a client callback
+        // can never re-enter ENet while we hold it.
+        silenceMs = peer->lastReceiveTime != 0
+            ? ENET_TIME_DIFFERENCE(client->serviceTime, peer->lastReceiveTime)
+            : 0;
 
         // Compute the next time we need to wake up to handle
         // the RTO timer or a ping.
@@ -1173,9 +1198,33 @@ static void controlReceiveThreadFunc(void* context) {
             else {
                 waitTimeMs = MIN(waitTimeMs, peer->pingInterval);
             }
+
+            // Serval-local: and don't sleep through the moment the silence
+            // watchdog below has something to say. Once the host stops
+            // answering, the only thing left to wake this thread is the RTO
+            // timer, which the timeout backoff stretches to a second.
+            waitTimeMs = MIN(waitTimeMs, CONTROL_INTERRUPTION_SILENCE_MS / 4);
         }
 
         PltUnlockMutex(&enetMutex);
+
+        // Serval-local: tell the client the stream is interrupted while ENet is
+        // still trying to reach the host, rather than leaving it showing a
+        // frozen picture with no explanation until the peer timeout expires.
+        // Both edges are reported: a stream that recovers says so, and the
+        // client takes its notice back down.
+        if (silenceMs >= CONTROL_INTERRUPTION_SILENCE_MS) {
+            if (!hostSilent) {
+                hostSilent = true;
+                Limelog("Host has not acknowledged the control stream in %u ms\n", silenceMs);
+                ListenerCallbacks.connectionInterrupted(true);
+            }
+        }
+        else if (hostSilent) {
+            hostSilent = false;
+            Limelog("Host is acknowledging the control stream again\n");
+            ListenerCallbacks.connectionInterrupted(false);
+        }
 
         if (err == 0) {
             // Handle a pending disconnect after unsuccessfully polling

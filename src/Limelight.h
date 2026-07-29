@@ -498,6 +498,18 @@ typedef struct _LI_CURSOR_SYNC_EVENT {
 
 typedef void(*ConnListenerCursorSync)(const LI_CURSOR_SYNC_EVENT* event);
 
+// Serval-local: invoked with true when the host stops acknowledging control
+// stream traffic mid-session, and with false if it starts answering again.
+//
+// This is not a termination. The core is still retransmitting, and a stream
+// whose host comes back resumes with no further action. It exists because the
+// peer timeout that does end the connection is several seconds long, and until
+// it expires a client has nothing to show but a frozen picture. Video and audio
+// have already stopped by the time this fires: they travel over the same route,
+// and the host acknowledges control traffic several times a second while it is
+// alive.
+typedef void(*ConnListenerConnectionInterrupted)(bool interrupted);
+
 typedef struct _CONNECTION_LISTENER_CALLBACKS {
     ConnListenerStageStarting stageStarting;
     ConnListenerStageComplete stageComplete;
@@ -513,6 +525,7 @@ typedef struct _CONNECTION_LISTENER_CALLBACKS {
     ConnListenerSetControllerLED setControllerLED;
     ConnListenerSetAdaptiveTriggers setAdaptiveTriggers;
     ConnListenerCursorSync cursorSync;
+    ConnListenerConnectionInterrupted connectionInterrupted;
 } CONNECTION_LISTENER_CALLBACKS, *PCONNECTION_LISTENER_CALLBACKS;
 
 // Use this function to zero the connection callbacks when allocated on the stack or heap
