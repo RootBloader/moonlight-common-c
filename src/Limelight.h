@@ -604,6 +604,23 @@ int LiSendCursorSyncEvent(uint8_t kind, uint8_t flags, uint8_t edge,
                           uint32_t generation, uint32_t sequence,
                           uint32_t x, uint32_t y);
 
+// Sends one Opus packet of client microphone audio to the host, which plays it
+// into a virtual microphone so applications there hear it as a local input.
+//
+// This travels on the audio RTP socket rather than the control stream. The
+// control stream is the wrong shape twice over: its payloads are capped at 251
+// bytes by a fixed stack buffer, and its mutex is shared with every mouse and
+// keyboard event, so continuous audio there would contend with input latency.
+// The audio socket is already open, already bidirectional (the client pings the
+// host on it twice a second), and carries nothing upstream but those pings.
+//
+// Datagrams are distinguished from pings by length and a magic word: a ping is
+// exactly sizeof(SS_PING) bytes, a microphone packet is longer and carries
+// 'MIC0' where the ping's sequence number sits.
+//
+// Safe to call from any thread once the connection is up. Returns 0 on success.
+int LiSendMicrophonePacket(const void* data, int length);
+
 // This function queues a relative mouse move event to be sent to the remote server.
 int LiSendMouseMoveEvent(short deltaX, short deltaY);
 

@@ -12,6 +12,12 @@ static PLT_THREAD decoderThread;
 static PPLT_CRYPTO_CONTEXT audioDecryptionCtx;
 static uint32_t avRiKeyId;
 
+// Client microphone, travelling the opposite way down the same socket.
+static PPLT_CRYPTO_CONTEXT micEncryptionCtx;
+static PLT_MUTEX micMutex;
+static uint32_t micSequenceNumber;
+static bool micReady;
+
 static unsigned short lastSeq;
 
 static bool pingThreadStarted;
@@ -81,6 +87,11 @@ int initializeAudioStream(void) {
     memcpy(&avRiKeyId, StreamConfig.remoteInputAesIv, sizeof(avRiKeyId));
     avRiKeyId = BE32(avRiKeyId);
 
+    micEncryptionCtx = PltCreateCryptoContext();
+    PltCreateMutex(&micMutex);
+    micSequenceNumber = 0;
+    micReady = false;
+
     return 0;
 }
 
@@ -106,6 +117,101 @@ int notifyAudioPortNegotiationComplete(void) {
     }
 
     pingThreadStarted = true;
+
+    // The socket exists and the destination is known, so the microphone has
+    // somewhere to send. The host ignores anything arriving before it has a
+    // session for it, so being early is harmless.
+    PltLockMutex(&micMutex);
+    micReady = true;
+    PltUnlockMutex(&micMutex);
+
+    return 0;
+}
+
+// Magic word distinguishing a microphone datagram from a ping. Sits exactly
+// where SS_PING keeps its sequence number, so the host can tell the two apart
+// by reading the same offset it already reads.
+#define MIC_PACKET_MAGIC 0x4D494330 // 'MIC0'
+
+int LiSendMicrophonePacket(const void* data, int length) {
+    // 16 bytes of session payload, 4 of magic, 4 of sequence number.
+    unsigned char datagram[sizeof(AudioPingPayload.payload) + 8 +
+                           ROUND_TO_PKCS7_PADDED_LEN(MAX_PACKET_SIZE)];
+    // The cipher may write padding in place, so the plaintext has to live
+    // somewhere that can be written past its length. Scribbling on the
+    // caller's Opus packet would be a bug even where there happened to be
+    // room for it.
+    unsigned char paddedData[ROUND_TO_PKCS7_PADDED_LEN(MAX_PACKET_SIZE)];
+    unsigned char iv[16] = { 0 };
+    LC_SOCKADDR saddr;
+    uint32_t magic, sequence, ivSeq;
+    int encryptedLength;
+    int headerLength = sizeof(AudioPingPayload.payload) + 8;
+
+    if (data == NULL || length <= 0 || length > MAX_PACKET_SIZE) {
+        return -1;
+    }
+
+    PltLockMutex(&micMutex);
+
+    // Everything below reads state teardown is allowed to change, so it all
+    // happens under the lock. The encrypt is a few microseconds on a 60-byte
+    // frame and this is called 50 times a second from one thread.
+    if (!micReady || rtpSocket == INVALID_SOCKET || AudioPingPayload.payload[0] == 0) {
+        PltUnlockMutex(&micMutex);
+        return -1;
+    }
+
+    sequence = ++micSequenceNumber;
+
+    // The IV shares the audio key but can never collide with an audio IV.
+    // Host-to-client audio derives its IV as (avRiKeyId + RTP sequence) in the
+    // first four bytes and leaves the remaining twelve zero; putting the magic
+    // in bytes 4 through 7 puts this direction in a disjoint space by
+    // construction rather than by hoping the counters do not meet.
+    ivSeq = BE32(sequence);
+    magic = BE32(MIC_PACKET_MAGIC);
+    memcpy(iv, &ivSeq, sizeof(ivSeq));
+    memcpy(iv + 4, &magic, sizeof(magic));
+
+    memcpy(paddedData, data, length);
+
+    // Deliberately without CIPHER_FLAG_PAD_TO_BLOCK_SIZE. That flag pads the
+    // plaintext by hand, and the CBC implementation underneath already runs
+    // with PKCS7 padding switched on, so asking for both padded every packet
+    // twice: once by hand to the block boundary, then again with a full block
+    // at Final. The host strips one layer and hands Opus a packet with the
+    // hand-added padding still on the end, which it refuses. Letting the
+    // cipher do its own padding is the round trip the host's OpenSSL expects.
+    encryptedLength = sizeof(datagram) - headerLength;
+    if (!PltEncryptMessage(micEncryptionCtx, ALGORITHM_AES_CBC,
+                           CIPHER_FLAG_RESET_IV | CIPHER_FLAG_FINISH,
+                           (unsigned char*)StreamConfig.remoteInputAesKey,
+                           sizeof(StreamConfig.remoteInputAesKey),
+                           iv, sizeof(iv),
+                           NULL, 0,
+                           paddedData, length,
+                           datagram + headerLength, &encryptedLength)) {
+        PltUnlockMutex(&micMutex);
+        return -1;
+    }
+
+    // The session identifier the host already matches pings against, so the
+    // receive side can find the session without a second lookup scheme.
+    memcpy(datagram, AudioPingPayload.payload, sizeof(AudioPingPayload.payload));
+    memcpy(datagram + sizeof(AudioPingPayload.payload), &magic, sizeof(magic));
+    memcpy(datagram + sizeof(AudioPingPayload.payload) + 4, &ivSeq, sizeof(ivSeq));
+
+    memcpy(&saddr, &RemoteAddr, sizeof(saddr));
+    SET_PORT(&saddr, AudioPortNumber);
+
+    // Errors are deliberately not checked, the same as the ping thread above:
+    // an ICMP port-unreachable from a host that has not bound yet is normal,
+    // and a microphone must never be able to disturb a stream.
+    sendto(rtpSocket, (char*)datagram, headerLength + encryptedLength, 0,
+           (struct sockaddr*)&saddr, AddrLen);
+
+    PltUnlockMutex(&micMutex);
     return 0;
 }
 
@@ -124,6 +230,13 @@ static void freePacketList(PLINKED_BLOCKING_QUEUE_ENTRY entry) {
 
 // Tear down the audio stream once we're done with it
 void destroyAudioStream(void) {
+    // Closes the door on LiSendMicrophonePacket before the socket goes away.
+    // A microphone thread on the client side can still be finishing a frame
+    // when teardown starts, and it holds no reference to any of this.
+    PltLockMutex(&micMutex);
+    micReady = false;
+    PltUnlockMutex(&micMutex);
+
     if (rtpSocket != INVALID_SOCKET) {
         if (pingThreadStarted) {
             PltInterruptThread(&udpPingThread);
@@ -134,6 +247,8 @@ void destroyAudioStream(void) {
         rtpSocket = INVALID_SOCKET;
     }
 
+    PltDeleteMutex(&micMutex);
+    PltDestroyCryptoContext(micEncryptionCtx);
     PltDestroyCryptoContext(audioDecryptionCtx);
     freePacketList(LbqDestroyLinkedBlockingQueue(&packetQueue));
     RtpaCleanupQueue(&rtpAudioQueue);
